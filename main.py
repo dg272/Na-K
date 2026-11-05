@@ -1,6 +1,8 @@
 import streamlit as st
 import pandas as pd
 import requests
+import plotly.graph_objects as go
+import plotly.express as px
 
 # 1. 페이지 기본 설정
 st.set_page_config(
@@ -10,7 +12,7 @@ st.set_page_config(
 )
 
 st.title("⚖️ 체내 Na/K 밸런스 & 수분 트래커")
-st.caption("식약처 API 기반 영양 밸런스 계산과 체중 맞춤형 수분 섭취 관리를 동시에 시작해보세요.")
+st.caption("식약처 API 기반 영양 밸런스 계산과 Plotly 차트를 활용한 시각적 헬스케어 리포트")
 
 # 세션 상태(Session State) 초기화
 if "daily_meals" not in st.session_state:
@@ -78,34 +80,23 @@ else:
 st.sidebar.divider()
 st.sidebar.subheader("💧 체수분 설정")
 weight = st.sidebar.number_input("현재 체중 (kg)", min_value=30, max_value=150, value=65, step=1)
-# 체중 1kg당 33ml 기준 권장 수분량 계산 (ml 단위)
 recommended_water = int(weight * 33)
 st.sidebar.info(f"💡 **{weight}kg** 기준 하루 권장 수분 섭취량: **{recommended_water} ml**")
 
 st.divider()
 
-# 4. 개선된 [일일 수분 섭취 트래커] 섹션
+# 4. 일일 수분 섭취 트래커 섹션
 st.subheader("💧 일일 수분 섭취 트래커")
 
-# 진행 상황 현황
 current_water = st.session_state.water_intake
 water_ratio = min(current_water / recommended_water, 1.0) if recommended_water > 0 else 0.0
 st.progress(water_ratio)
 st.write(f"현재 섭취량: **{current_water} ml** / 권장량: **{recommended_water} ml** ({int(water_ratio * 100)}% 달성)")
 
-# 입력 컨트롤 UI (간편 버튼 + 직접 입력)
 w_col1, w_col2, w_col3 = st.columns([1.5, 1, 1])
 
 with w_col1:
-    custom_water = st.number_input(
-        "직접 용량 입력 (ml)", 
-        min_value=10, 
-        max_value=2000, 
-        value=150, 
-        step=50, 
-        label_visibility="collapsed",
-        help="원하는 마신 물의 양(ml)을 직접 입력하세요."
-    )
+    custom_water = st.number_input("직접 용량 입력 (ml)", min_value=10, max_value=2000, value=150, step=50, label_visibility="collapsed")
     if st.button(f"+ {custom_water}ml 추가", use_container_width=True):
         st.session_state.water_intake += custom_water
         st.rerun()
@@ -177,8 +168,8 @@ if st.button("식단에 추가하기", use_container_width=True):
 
 st.divider()
 
-# 6. 영양 & 수분 종합 분석 섹션
-st.subheader("📊 오늘의 종합 신체 밸런스 분석")
+# 6. Plotly 기반 인터랙티브 분석 시각화
+st.subheader("📊 Plotly 인터랙티브 영양 분석")
 
 if not st.session_state.daily_meals:
     st.info("기록된 식단이 없습니다. 상단에서 음식을 검색하여 등록해 주세요.")
@@ -195,23 +186,69 @@ else:
     m3.metric("Na : K 비율", f"{ratio:.2f} : 1")
     m4.metric("수분 달성률", f"{int(water_ratio * 100)}%")
 
-    # 종합 판정 로직
+    # 종합 판정 메시지
     if ratio > 2.0 or total_na > 2000:
         if current_water >= recommended_water:
-            st.warning("⚠️ 나트륨 섭취량이 많으나, **충분한 수분을 섭취하여 나트륨 배출(이뇨)을 돕고 있습니다.** 칼륨 식품을 추가해 보세요!")
+            st.warning("⚠️ 나트륨 섭취량이 많으나, **충분한 수분을 섭취하여 배출을 돕고 있습니다.** 칼륨 식품을 추가하세요!")
         else:
-            st.error("⚠️ **나트륨 과다 & 수분 부족 상태입니다!** 부종 예방을 위해 물과 칼륨(바나나, 감자 등)을 충분히 섭취해 주세요.")
+            st.error("⚠️ **나트륨 과다 & 수분 부족 상태입니다!** 부종 예방을 위해 물과 칼륨을 충분히 섭취해 주세요.")
     elif ratio > 1.2:
-        st.warning("⚠️ 나트륨 비율이 약간 높습니다. 칼륨과 물을 소폭 더 섭취하세요.")
+        st.warning("⚠️ 나트륨 비율이 약간 높습니다.")
     else:
-        st.success("✅ **완벽한 신체 밸런스입니다!** 나트륨/칼륨 비율과 수분 상태가 매우 건강합니다.")
+        st.success("✅ **완벽한 신체 밸런스입니다!**")
 
-    # 그래프 시각화
-    chart_df = pd.DataFrame({
-        "영양소": ["나트륨 (Na)", "칼륨 (K)"],
-        "섭취량 (mg)": [total_na, total_k]
-    }).set_index("영양소")
-    st.bar_chart(chart_df)
+    # [Plotly 차트 1] Na:K 비율 게이지 차트 (Gauge Chart)
+    fig_gauge = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=ratio,
+        title={'text': "<b>Na : K 비율 게이지 (권장 1.0)</b>", 'font': {'size': 18}},
+        gauge={
+            'axis': {'range': [0, 5], 'tickwidth': 1, 'tickcolor': "darkblue"},
+            'bar': {'color': "#2b5c8f"},
+            'bgcolor': "white",
+            'borderwidth': 2,
+            'bordercolor': "gray",
+            'steps': [
+                {'range': [0, 1.2], 'color': '#a3e635'},   # 안전 (녹색)
+                {'range': [1.2, 2.0], 'color': '#facc15'}, # 주의 (노랑)
+                {'range': [2.0, 5.0], 'color': '#f87171'}  # 위험 (빨강)
+            ],
+            'threshold': {
+                'line': {'color': "red", 'width': 4},
+                'thickness': 0.75,
+                'value': 1.0
+            }
+        }
+    ))
+    fig_gauge.update_layout(height=300, margin=dict(l=20, r=20, t=40, b=20))
+    st.plotly_chart(fig_gauge, use_container_width=True)
+
+    # [Plotly 차트 2] 음식별 나트륨 vs 칼륨 비중 도넛 차트 (Donut Charts)
+    p_col1, p_col2 = st.columns(2)
+
+    with p_col1:
+        fig_na_donut = px.pie(
+            df, 
+            values="나트륨 (Na, mg)", 
+            names="음식명", 
+            title="<b>음식별 나트륨 기여도</b>",
+            hole=0.4,
+            color_discrete_sequence=px.colors.qualitative.Reds_r
+        )
+        fig_na_donut.update_layout(margin=dict(l=10, r=10, t=40, b=10), height=300)
+        st.plotly_chart(fig_na_donut, use_container_width=True)
+
+    with p_col2:
+        fig_k_donut = px.pie(
+            df, 
+            values="칼륨 (K, mg)", 
+            names="음식명", 
+            title="<b>음식별 칼륨 기여도</b>",
+            hole=0.4,
+            color_discrete_sequence=px.colors.qualitative.Greens_r
+        )
+        fig_k_donut.update_layout(margin=dict(l=10, r=10, t=40, b=10), height=300)
+        st.plotly_chart(fig_k_donut, use_container_width=True)
 
     st.write("📋 **오늘 입력한 식단 목록**")
     st.dataframe(df, use_container_width=True, hide_index=True)
