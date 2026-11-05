@@ -4,6 +4,13 @@ import requests
 import plotly.graph_objects as go
 import plotly.express as px
 from datetime import date
+import io
+
+# PDF 생성을 위한 ReportLab 라이브러리
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
 
 # 1. 페이지 기본 설정
 st.set_page_config(
@@ -13,7 +20,7 @@ st.set_page_config(
 )
 
 st.title("⚖️ 체내 Na/K 밸런스 & 수분 트래커")
-st.caption("식약처 API 기반 영양 밸런스 계산과 데이터 누적 추이 분석 리포트")
+st.caption("식약처 API 기반 영양 밸런스 계산, 추이 분석 및 리포트 다운로드")
 
 # 세션 상태(Session State) 초기화
 if "daily_meals" not in st.session_state:
@@ -23,7 +30,6 @@ if "water_intake" not in st.session_state:
     st.session_state.water_intake = 0  # 단위: ml
 
 if "history" not in st.session_state:
-    # 일자별 누적 데이터 저장을 위한 리스트 초기화
     st.session_state.history = []
 
 # 백업용 내장 데이터베이스
@@ -41,9 +47,92 @@ DEFAULT_FOOD_DB = {
     "토마토": {"na": 5.0, "k": 230.0}
 }
 
+# PDF 리포트 생성 함수
+def generate_pdf_report(df_meals, total_na, total_k, ratio, current_water, recommended_water, eval_msg):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40)
+    story = []
+
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'TitleStyle',
+        parent=styles['Heading1'],
+        fontSize=20,
+        alignment=1,
+        spaceAfter=20
+    )
+    subtitle_style = ParagraphStyle(
+        'SubTitleStyle',
+        parent=styles['Heading2'],
+        fontSize=14,
+        spaceBefore=15,
+        spaceAfter=10
+    )
+    body_style = ParagraphStyle(
+        'BodyStyle',
+        parent=styles['Normal'],
+        fontSize=10,
+        leading=14
+    )
+
+    # 헤더 및 타이틀
+    story.append(Paragraph("<b>Daily Na:K & Hydration Healthcare Report</b>", title_style))
+    story.append(Paragraph(f"Date: {date.today().strftime('%Y-%m-%d')}", body_style))
+    story.append(Spacer(1, 15))
+
+    # 요약 메트릭 표
+    summary_data = [
+        ["Metric", "Value", "Baseline / Status"],
+        ["Total Sodium (Na)", f"{int(total_na)} mg", "Recommended < 2000 mg"],
+        ["Total Potassium (K)", f"{int(total_k)} mg", "Recommended ~ 3500 mg"],
+        ["Na : K Ratio", f"{ratio:.2f} : 1", "Target ~ 1.0 : 1"],
+        ["Water Intake", f"{current_water} ml / {recommended_water} ml", f"{int((current_water/recommended_water)*100 if recommended_water>0 else 0)}% Goal"]
+    ]
+    summary_table = Table(summary_data, colWidths=[150, 150, 200])
+    summary_table.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#2b5c8f')),
+        ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+        ('BOTTOMPADDING', (0,0), (-1,0), 8),
+        ('BACKGROUND', (0,1), (-1,-1), colors.HexColor('#f8fafc')),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#cbd5e1')),
+    ]))
+    story.append(summary_table)
+    story.append(Spacer(1, 15))
+
+    # 종합 평가
+    story.append(Paragraph("<b>Health Evaluation</b>", subtitle_style))
+    story.append(Paragraph(f"Status: {eval_msg}", body_style))
+    story.append(Spacer(1, 15))
+
+    # 식단 상세 내역 표
+    story.append(Paragraph("<b>Dietary Intake Log</b>", subtitle_style))
+    table_data = [["Food Name", "Servings", "Sodium (Na, mg)", "Potassium (K, mg)"]]
+    for idx, row in df_meals.iterrows():
+        table_data.append([
+            str(row["음식명"]),
+            str(row["분량"]),
+            str(row["나트륨 (Na, mg)"]),
+            str(row["칼륨 (K, mg)"])
+        ])
+
+    meal_table = Table(table_data, colWidths=[180, 100, 110, 110])
+    meal_table.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#475569')),
+        ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#e2e8f0')),
+    ]))
+    story.append(meal_table)
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
+
 # 2. 식약처 API 연동 함수 (03 최신 버전)
 def fetch_food_data_api(food_name, api_key):
-    """식품의약품안전처 식품영양성분 DB API 호출"""
     url = "https://apis.data.go.kr/1471000/FoodNtrCpntDbInfo03/getFoodNtrCpntDbInq03"
     params = {
         "serviceKey": api_key,
@@ -194,20 +283,23 @@ else:
     m3.metric("Na : K 비율", f"{ratio:.2f} : 1")
     m4.metric("수분 달성률", f"{int(water_ratio * 100)}%")
 
-    # 종합 판정 메시지
+    eval_msg = ""
     if ratio > 2.0 or total_na > 2000:
         if current_water >= recommended_water:
+            eval_msg = "High Sodium intake, but compensated by sufficient Hydration."
             st.warning("⚠️ 나트륨 섭취량이 많으나, **충분한 수분을 섭취하여 배출을 돕고 있습니다.** 칼륨 식품을 추가하세요!")
         else:
+            eval_msg = "High Sodium & Low Water intake. Warning level."
             st.error("⚠️ **나트륨 과다 & 수분 부족 상태입니다!** 부종 예방을 위해 물과 칼륨을 충분히 섭취해 주세요.")
     elif ratio > 1.2:
+        eval_msg = "Slightly elevated Sodium to Potassium ratio."
         st.warning("⚠️ 나트륨 비율이 약간 높습니다.")
     else:
+        eval_msg = "Optimal Sodium, Potassium, and Water Balance."
         st.success("✅ **완벽한 신체 밸런스입니다!**")
 
-    # [Plotly 차트 1] Na:K 비율 게이지 차트
+    # Plotly 게이지 차트
     gauge_pointer_value = min(ratio, 5.0)
-
     fig_gauge = go.Figure(go.Indicator(
         mode="gauge+number",
         value=ratio,
@@ -219,9 +311,9 @@ else:
             'borderwidth': 2,
             'bordercolor': "gray",
             'steps': [
-                {'range': [0, 1.2], 'color': '#a3e635'},   # 안전 (녹색)
-                {'range': [1.2, 2.0], 'color': '#facc15'}, # 주의 (노랑)
-                {'range': [2.0, 5.0], 'color': '#f87171'}  # 위험 (빨강)
+                {'range': [0, 1.2], 'color': '#a3e635'},
+                {'range': [1.2, 2.0], 'color': '#facc15'},
+                {'range': [2.0, 5.0], 'color': '#f87171'}
             ],
             'threshold': {
                 'line': {'color': "red", 'width': 4},
@@ -235,7 +327,6 @@ else:
 
     # 7. 맞춤형 음식 추천 섹션
     st.subheader("💡 오늘의 영양 맞춤 음식 추천")
-    
     recommendations = []
     if ratio > 1.2:
         st.markdown("현재 나트륨 비율이 높아 **나트륨 배출을 돕는 고칼륨 음식**을 추천합니다:")
@@ -271,16 +362,12 @@ else:
 
     st.divider()
 
-    # [Plotly 차트 2] 음식별 나트륨 vs 칼륨 비중 도넛 차트
+    # Plotly 도넛 차트
     p_col1, p_col2 = st.columns(2)
-
     with p_col1:
         fig_na_donut = px.pie(
-            df, 
-            values="나트륨 (Na, mg)", 
-            names="음식명", 
-            title="<b>음식별 나트륨 기여도</b>",
-            hole=0.4,
+            df, values="나트륨 (Na, mg)", names="음식명", 
+            title="<b>음식별 나트륨 기여도</b>", hole=0.4,
             color_discrete_sequence=px.colors.sequential.Reds_r
         )
         fig_na_donut.update_layout(margin=dict(l=10, r=10, t=40, b=10), height=300)
@@ -288,11 +375,8 @@ else:
 
     with p_col2:
         fig_k_donut = px.pie(
-            df, 
-            values="칼륨 (K, mg)", 
-            names="음식명", 
-            title="<b>음식별 칼륨 기여도</b>",
-            hole=0.4,
+            df, values="칼륨 (K, mg)", names="음식명", 
+            title="<b>음식별 칼륨 기여도</b>", hole=0.4,
             color_discrete_sequence=px.colors.sequential.Greens_r
         )
         fig_k_donut.update_layout(margin=dict(l=10, r=10, t=40, b=10), height=300)
@@ -301,16 +385,37 @@ else:
     st.write("📋 **오늘 입력한 식단 목록**")
     st.dataframe(df, use_container_width=True, hide_index=True)
 
-    # 8. 일자별 데이터 저장 버튼
-    save_col1, save_col2 = st.columns([2, 1])
-    with save_col1:
-        record_date = st.date_input("저장할 날짜 선택", value=date.today())
-    with save_col2:
-        st.write("") # 간격 조절
-        st.write("")
+    # 📥 8. 새로 추가된 식단 데이터 CSV/PDF 다운로드 버튼 섹션
+    st.subheader("📥 리포트 다운로드 및 기록 저장")
+    
+    down_col1, down_col2, down_col3 = st.columns(3)
+
+    # CSV 다운로드 (한글 깨짐 방지: utf-8-sig)
+    csv_data = df.to_csv(index=False).encode('utf-8-sig')
+    with down_col1:
+        st.download_button(
+            label="📄 CSV 파일 다운로드",
+            data=csv_data,
+            file_name=f"diet_log_{date.today().strftime('%Y%m%d')}.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+
+    # PDF 리포트 다운로드
+    pdf_buffer = generate_pdf_report(df, total_na, total_k, ratio, current_water, recommended_water, eval_msg)
+    with down_col2:
+        st.download_button(
+            label="📑 PDF 리포트 다운로드",
+            data=pdf_buffer,
+            file_name=f"health_report_{date.today().strftime('%Y%m%d')}.pdf",
+            mime="application/pdf",
+            use_container_width=True
+        )
+
+    # 일자별 데이터 누적 저장 버튼
+    with down_col3:
         if st.button("💾 오늘 기록 저장하기", use_container_width=True):
-            # 동일 날짜 기존 기록 덮어쓰기/업데이트
-            date_str = str(record_date)
+            date_str = str(date.today())
             st.session_state.history = [h for h in st.session_state.history if h["날짜"] != date_str]
             st.session_state.history.append({
                 "날짜": date_str,
@@ -319,7 +424,7 @@ else:
                 "Na:K 비율": round(ratio, 2),
                 "수분(ml)": current_water
             })
-            st.success(f"{date_str} 기록이 저장되었습니다!")
+            st.success(f"{date_str} 기록 저장 완료!")
             st.rerun()
 
     col_reset1, col_reset2 = st.columns(2)
@@ -333,33 +438,24 @@ else:
 
 st.divider()
 
-# 9. 새로 추가된 [주간/월간 영양 섭취 추이 분석] 섹션
+# 9. 주간/월간 영양 섭취 추이 분석 섹션
 st.subheader("📈 영양 섭취 & 비율 누적 추이 분석")
 
 if not st.session_state.history:
     st.info("💡 기록된 누적 데이터가 없습니다. 상단에서 식단과 수분을 기록한 후 **'오늘 기록 저장하기'** 버튼을 눌러보세요.")
 else:
-    hist_df = pd.DataFrame(st.session_state.history)
-    hist_df = hist_df.sort_values("날짜") # 날짜 오름차순 정렬
+    hist_df = pd.DataFrame(st.session_state.history).sort_values("날짜")
 
-    # 섭취량 추이 꺾은선 그래프 (나트륨 vs 칼륨)
     fig_line = px.line(
-        hist_df,
-        x="날짜",
-        y=["나트륨(mg)", "칼륨(mg)"],
-        markers=True,
+        hist_df, x="날짜", y=["나트륨(mg)", "칼륨(mg)"], markers=True,
         title="<b>일자별 나트륨 vs 칼륨 섭취 추이 (mg)</b>",
         color_discrete_map={"나트륨(mg)": "#ef4444", "칼륨(mg)": "#22c55e"}
     )
     fig_line.update_layout(height=350, xaxis_title="날짜", yaxis_title="섭취량 (mg)")
     st.plotly_chart(fig_line, use_container_width=True)
 
-    # Na:K 비율 추이 꺾은선 그래프
     fig_ratio_line = px.line(
-        hist_df,
-        x="날짜",
-        y="Na:K 비율",
-        markers=True,
+        hist_df, x="날짜", y="Na:K 비율", markers=True,
         title="<b>일자별 Na : K 비율 추이 (권장: 1.0)</b>"
     )
     fig_ratio_line.add_hline(y=1.0, line_dash="dash", line_color="green", annotation_text="목표 비율 (1.0)")
