@@ -3,6 +3,7 @@ import pandas as pd
 import requests
 import plotly.graph_objects as go
 import plotly.express as px
+from datetime import date
 
 # 1. 페이지 기본 설정
 st.set_page_config(
@@ -12,7 +13,7 @@ st.set_page_config(
 )
 
 st.title("⚖️ 체내 Na/K 밸런스 & 수분 트래커")
-st.caption("식약처 API 기반 영양 밸런스 계산과 맞춤형 음식 추천을 제공하는 헬스케어 리포트")
+st.caption("식약처 API 기반 영양 밸런스 계산과 데이터 누적 추이 분석 리포트")
 
 # 세션 상태(Session State) 초기화
 if "daily_meals" not in st.session_state:
@@ -20,6 +21,10 @@ if "daily_meals" not in st.session_state:
 
 if "water_intake" not in st.session_state:
     st.session_state.water_intake = 0  # 단위: ml
+
+if "history" not in st.session_state:
+    # 일자별 누적 데이터 저장을 위한 리스트 초기화
+    st.session_state.history = []
 
 # 백업용 내장 데이터베이스
 DEFAULT_FOOD_DB = {
@@ -228,7 +233,7 @@ else:
     fig_gauge.update_layout(height=300, margin=dict(l=20, r=20, t=40, b=20))
     st.plotly_chart(fig_gauge, use_container_width=True)
 
-    # 7. 새로 추가된 [맞춤형 음식 추천] 섹션
+    # 7. 맞춤형 음식 추천 섹션
     st.subheader("💡 오늘의 영양 맞춤 음식 추천")
     
     recommendations = []
@@ -296,6 +301,27 @@ else:
     st.write("📋 **오늘 입력한 식단 목록**")
     st.dataframe(df, use_container_width=True, hide_index=True)
 
+    # 8. 일자별 데이터 저장 버튼
+    save_col1, save_col2 = st.columns([2, 1])
+    with save_col1:
+        record_date = st.date_input("저장할 날짜 선택", value=date.today())
+    with save_col2:
+        st.write("") # 간격 조절
+        st.write("")
+        if st.button("💾 오늘 기록 저장하기", use_container_width=True):
+            # 동일 날짜 기존 기록 덮어쓰기/업데이트
+            date_str = str(record_date)
+            st.session_state.history = [h for h in st.session_state.history if h["날짜"] != date_str]
+            st.session_state.history.append({
+                "날짜": date_str,
+                "나트륨(mg)": total_na,
+                "칼륨(mg)": total_k,
+                "Na:K 비율": round(ratio, 2),
+                "수분(ml)": current_water
+            })
+            st.success(f"{date_str} 기록이 저장되었습니다!")
+            st.rerun()
+
     col_reset1, col_reset2 = st.columns(2)
     if col_reset1.button("식단 기록 초기화", use_container_width=True):
         st.session_state.daily_meals = []
@@ -303,4 +329,46 @@ else:
         
     if col_reset2.button("수분 기록 초기화", use_container_width=True):
         st.session_state.water_intake = 0
+        st.rerun()
+
+st.divider()
+
+# 9. 새로 추가된 [주간/월간 영양 섭취 추이 분석] 섹션
+st.subheader("📈 영양 섭취 & 비율 누적 추이 분석")
+
+if not st.session_state.history:
+    st.info("💡 기록된 누적 데이터가 없습니다. 상단에서 식단과 수분을 기록한 후 **'오늘 기록 저장하기'** 버튼을 눌러보세요.")
+else:
+    hist_df = pd.DataFrame(st.session_state.history)
+    hist_df = hist_df.sort_values("날짜") # 날짜 오름차순 정렬
+
+    # 섭취량 추이 꺾은선 그래프 (나트륨 vs 칼륨)
+    fig_line = px.line(
+        hist_df,
+        x="날짜",
+        y=["나트륨(mg)", "칼륨(mg)"],
+        markers=True,
+        title="<b>일자별 나트륨 vs 칼륨 섭취 추이 (mg)</b>",
+        color_discrete_map={"나트륨(mg)": "#ef4444", "칼륨(mg)": "#22c55e"}
+    )
+    fig_line.update_layout(height=350, xaxis_title="날짜", yaxis_title="섭취량 (mg)")
+    st.plotly_chart(fig_line, use_container_width=True)
+
+    # Na:K 비율 추이 꺾은선 그래프
+    fig_ratio_line = px.line(
+        hist_df,
+        x="날짜",
+        y="Na:K 비율",
+        markers=True,
+        title="<b>일자별 Na : K 비율 추이 (권장: 1.0)</b>"
+    )
+    fig_ratio_line.add_hline(y=1.0, line_dash="dash", line_color="green", annotation_text="목표 비율 (1.0)")
+    fig_ratio_line.update_layout(height=300, xaxis_title="날짜", yaxis_title="비율")
+    st.plotly_chart(fig_ratio_line, use_container_width=True)
+
+    st.write("📋 **누적 기록 히스토리 목록**")
+    st.dataframe(hist_df, use_container_width=True, hide_index=True)
+
+    if st.button("전체 히스토리 삭제", type="secondary"):
+        st.session_state.history = []
         st.rerun()
