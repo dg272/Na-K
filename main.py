@@ -12,7 +12,7 @@ st.set_page_config(
 )
 
 st.title("⚖️ 체내 Na/K 밸런스 & 수분 트래커")
-st.caption("식약처 API 기반 영양 밸런스 계산과 Plotly 차트를 활용한 시각적 헬스케어 리포트")
+st.caption("식약처 API 기반 영양 밸런스 계산과 맞춤형 음식 추천을 제공하는 헬스케어 리포트")
 
 # 세션 상태(Session State) 초기화
 if "daily_meals" not in st.session_state:
@@ -21,7 +21,7 @@ if "daily_meals" not in st.session_state:
 if "water_intake" not in st.session_state:
     st.session_state.water_intake = 0  # 단위: ml
 
-# 백업용 내장 데이터베이스 (API 호출 실패 시 사용)
+# 백업용 내장 데이터베이스
 DEFAULT_FOOD_DB = {
     "김치찌개": {"na": 1960.0, "k": 320.0},
     "라면": {"na": 1790.0, "k": 180.0},
@@ -30,7 +30,10 @@ DEFAULT_FOOD_DB = {
     "시금치나물": {"na": 120.0, "k": 460.0},
     "찐감자": {"na": 5.0, "k": 420.0},
     "닭가슴살 샐러드": {"na": 220.0, "k": 380.0},
-    "우유 (200ml)": {"na": 100.0, "k": 300.0}
+    "우유 (200ml)": {"na": 100.0, "k": 300.0},
+    "아보카도": {"na": 7.0, "k": 485.0},
+    "찐고구마": {"na": 10.0, "k": 540.0},
+    "토마토": {"na": 5.0, "k": 230.0}
 }
 
 # 2. 식약처 API 연동 함수 (03 최신 버전)
@@ -197,12 +200,12 @@ else:
     else:
         st.success("✅ **완벽한 신체 밸런스입니다!**")
 
-    # [Plotly 차트 1] Na:K 비율 게이지 차트 (Gauge Chart - 수치 초과 시 바늘 위치 오버플로우 보정)
-    gauge_pointer_value = min(ratio, 5.0)  # 비율이 5를 넘어가도 바늘은 5(위험 끝)를 가리키도록 설정
+    # [Plotly 차트 1] Na:K 비율 게이지 차트
+    gauge_pointer_value = min(ratio, 5.0)
 
     fig_gauge = go.Figure(go.Indicator(
         mode="gauge+number",
-        value=ratio,  # 텍스트 수치는 실제 계산값(예: 127.14) 표시
+        value=ratio,
         title={'text': "<b>Na : K 비율 게이지 (권장 1.0)</b>", 'font': {'size': 18}},
         gauge={
             'axis': {'range': [0, 5], 'tickwidth': 1, 'tickcolor': "darkblue"},
@@ -225,7 +228,45 @@ else:
     fig_gauge.update_layout(height=300, margin=dict(l=20, r=20, t=40, b=20))
     st.plotly_chart(fig_gauge, use_container_width=True)
 
-    # [Plotly 차트 2] 음식별 나트륨 vs 칼륨 비중 도넛 차트 (Donut Charts)
+    # 7. 새로 추가된 [맞춤형 음식 추천] 섹션
+    st.subheader("💡 오늘의 영양 맞춤 음식 추천")
+    
+    recommendations = []
+    if ratio > 1.2:
+        st.markdown("현재 나트륨 비율이 높아 **나트륨 배출을 돕는 고칼륨 음식**을 추천합니다:")
+        recommendations = [
+            ("바나나", "칼륨 358mg", 1.0, 358.0),
+            ("시금치나물", "칼륨 460mg", 120.0, 460.0),
+            ("찐감자", "칼륨 420mg", 5.0, 420.0),
+            ("아보카도", "칼륨 485mg", 7.0, 485.0),
+            ("찐고구마", "칼륨 540mg", 10.0, 540.0)
+        ]
+    else:
+        st.markdown("균형 잡힌 영양 상태를 유지할 수 있는 **건강 추천 식품**입니다:")
+        recommendations = [
+            ("토마토", "칼륨 230mg", 5.0, 230.0),
+            ("닭가슴살 샐러드", "단백질&칼륨 풍부", 220.0, 380.0),
+            ("우유 (200ml)", "칼슘&칼륨 섭취", 100.0, 300.0)
+        ]
+
+    rec_cols = st.columns(len(recommendations))
+    for i, (f_name, f_desc, f_na, f_k) in enumerate(recommendations):
+        with rec_cols[i]:
+            st.markdown(f"**{f_name}**")
+            st.caption(f_desc)
+            if st.button(f"+ {f_name}", key=f"rec_btn_{i}"):
+                st.session_state.daily_meals.append({
+                    "음식명": f_name,
+                    "분량": "1 인분/개",
+                    "나트륨 (Na, mg)": f_na,
+                    "칼륨 (K, mg)": f_k
+                })
+                st.success(f"{f_name} 추가 완료!")
+                st.rerun()
+
+    st.divider()
+
+    # [Plotly 차트 2] 음식별 나트륨 vs 칼륨 비중 도넛 차트
     p_col1, p_col2 = st.columns(2)
 
     with p_col1:
