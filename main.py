@@ -84,23 +84,39 @@ st.sidebar.info(f"💡 **{weight}kg** 기준 하루 권장 수분 섭취량: **{
 
 st.divider()
 
-# 4. 새로 추가된 [수분 섭취 트래커] 섹션
+# 4. 개선된 [일일 수분 섭취 트래커] 섹션
 st.subheader("💧 일일 수분 섭취 트래커")
 
-water_col1, water_col2 = st.columns([2, 1])
+# 진행 상황 현황
+current_water = st.session_state.water_intake
+water_ratio = min(current_water / recommended_water, 1.0) if recommended_water > 0 else 0.0
+st.progress(water_ratio)
+st.write(f"현재 섭취량: **{current_water} ml** / 권장량: **{recommended_water} ml** ({int(water_ratio * 100)}% 달성)")
 
-with water_col1:
-    current_water = st.session_state.water_intake
-    water_ratio = min(current_water / recommended_water, 1.0) if recommended_water > 0 else 0.0
-    st.progress(water_ratio)
-    st.write(f"현재 섭취량: **{current_water} ml** / 권장량: **{recommended_water} ml** ({int(water_ratio * 100)}% 달성)")
+# 입력 컨트롤 UI (간편 버튼 + 직접 입력)
+w_col1, w_col2, w_col3 = st.columns([1.5, 1, 1])
 
-with water_col2:
-    btn_col1, btn_col2 = st.columns(2)
-    if btn_col1.button("+200ml", use_container_width=True):
+with w_col1:
+    custom_water = st.number_input(
+        "직접 용량 입력 (ml)", 
+        min_value=10, 
+        max_value=2000, 
+        value=150, 
+        step=50, 
+        label_visibility="collapsed",
+        help="원하는 마신 물의 양(ml)을 직접 입력하세요."
+    )
+    if st.button(f"+ {custom_water}ml 추가", use_container_width=True):
+        st.session_state.water_intake += custom_water
+        st.rerun()
+
+with w_col2:
+    if st.button("+ 200ml (한 컵)", use_container_width=True):
         st.session_state.water_intake += 200
         st.rerun()
-    if btn_col2.button("+500ml", use_container_width=True):
+
+with w_col3:
+    if st.button("+ 500ml (텀블러)", use_container_width=True):
         st.session_state.water_intake += 500
         st.rerun()
 
@@ -179,7 +195,7 @@ else:
     m3.metric("Na : K 비율", f"{ratio:.2f} : 1")
     m4.metric("수분 달성률", f"{int(water_ratio * 100)}%")
 
-    # 나트륨-칼륨-수분 종합 판정 로직
+    # 종합 판정 로직
     if ratio > 2.0 or total_na > 2000:
         if current_water >= recommended_water:
             st.warning("⚠️ 나트륨 섭취량이 많으나, **충분한 수분을 섭취하여 나트륨 배출(이뇨)을 돕고 있습니다.** 칼륨 식품을 추가해 보세요!")
@@ -190,7 +206,7 @@ else:
     else:
         st.success("✅ **완벽한 신체 밸런스입니다!** 나트륨/칼륨 비율과 수분 상태가 매우 건강합니다.")
 
-    # 영양소 시각화 차트
+    # 그래프 시각화
     chart_df = pd.DataFrame({
         "영양소": ["나트륨 (Na)", "칼륨 (K)"],
         "섭취량 (mg)": [total_na, total_k]
