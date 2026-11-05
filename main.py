@@ -197,10 +197,12 @@ else:
     else:
         st.success("✅ **완벽한 신체 밸런스입니다!**")
 
-    # [Plotly 차트 1] Na:K 비율 게이지 차트 (Gauge Chart)
+    # [Plotly 차트 1] Na:K 비율 게이지 차트 (Gauge Chart - 수치 초과 시 바늘 위치 오버플로우 보정)
+    gauge_pointer_value = min(ratio, 5.0)  # 비율이 5를 넘어가도 바늘은 5(위험 끝)를 가리키도록 설정
+
     fig_gauge = go.Figure(go.Indicator(
         mode="gauge+number",
-        value=ratio,
+        value=ratio,  # 텍스트 수치는 실제 계산값(예: 127.14) 표시
         title={'text': "<b>Na : K 비율 게이지 (권장 1.0)</b>", 'font': {'size': 18}},
         gauge={
             'axis': {'range': [0, 5], 'tickwidth': 1, 'tickcolor': "darkblue"},
@@ -216,7 +218,7 @@ else:
             'threshold': {
                 'line': {'color': "red", 'width': 4},
                 'thickness': 0.75,
-                'value': 1.0
+                'value': gauge_pointer_value
             }
         }
     ))
