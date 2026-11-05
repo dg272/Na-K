@@ -233,7 +233,7 @@ else:
             names="음식명", 
             title="<b>음식별 나트륨 기여도</b>",
             hole=0.4,
-            color_discrete_sequence=px.colors.qualitative.Reds_r
+            color_discrete_sequence=px.colors.sequential.Reds_r
         )
         fig_na_donut.update_layout(margin=dict(l=10, r=10, t=40, b=10), height=300)
         st.plotly_chart(fig_na_donut, use_container_width=True)
@@ -245,7 +245,7 @@ else:
             names="음식명", 
             title="<b>음식별 칼륨 기여도</b>",
             hole=0.4,
-            color_discrete_sequence=px.colors.qualitative.Greens_r
+            color_discrete_sequence=px.colors.sequential.Greens_r
         )
         fig_k_donut.update_layout(margin=dict(l=10, r=10, t=40, b=10), height=300)
         st.plotly_chart(fig_k_donut, use_container_width=True)
